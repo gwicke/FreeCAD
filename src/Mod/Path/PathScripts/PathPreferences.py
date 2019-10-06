@@ -84,7 +84,8 @@ def defaultPostProcessorArgs():
     return pref.GetString(PostProcessorDefaultArgs, "")
 
 def defaultGeometryTolerance():
-    return preferences().GetFloat(GeometryTolerance, 0.01)
+    # Default: 0.01mm
+    return preferences().GetFloat(GeometryTolerance, 0.00001)
 
 def defaultLibAreaCurveAccuracy():
     return preferences().GetFloat(LibAreaCurveAccuracy, 0.01)
