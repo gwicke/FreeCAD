@@ -178,7 +178,7 @@ def process(doc, filename):
             y = float(curdat.group("yval"))
 
             # the normal processing
-            coords.append(Vector(x, y, 0))
+            coords.append(Vector(0, x, y))
 
     afile.close()
 
