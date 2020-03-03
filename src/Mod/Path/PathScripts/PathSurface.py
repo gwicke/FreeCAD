@@ -242,7 +242,10 @@ class ObjectSurface(PathOp.ObjectOp):
                 obj.StepOver = 100
             if obj.StepOver < 1:
                 obj.StepOver = 1
-            self.cutOut = (self.cutter.getDiameter() * (float(obj.StepOver) / 100.0))
+            # Use the original tool diameter, as self.cutter may be enlarged
+            # to provide an offset from the workpiece surface.
+            toolDiameter = obj.ToolController.Tool.Diameter
+            self.cutOut = (toolDiameter * (float(obj.StepOver) / 100.0))
             self.reportThis("Cut out: " + str(self.cutOut) + " mm")
 
         # Cycle through parts of model
@@ -272,7 +275,14 @@ class ObjectSurface(PathOp.ObjectOp):
                     deflection = PathPreferences.defaultGeometryTolerance()
                 # base.Shape.tessellate(0.05) # 0.5 original value
                 # mesh = MeshPart.meshFromShape(base.Shape, Deflection=deflection)
-                mesh = MeshPart.meshFromShape(Shape=base.Shape, LinearDeflection=deflection, AngularDeflection=0.5, Relative=False)
+                # mesh = MeshPart.meshFromShape(Shape=base.Shape,
+                #         LinearDeflection=deflection,
+                #         AngularDeflection=0.017, # Radians
+                #         Relative=False)
+                mesh = MeshPart.meshFromShape(Shape=base.Shape,
+                        LinearDeflection=deflection,
+                        AngularDeflection=0.5, # Radians
+                        Relative=False)
 
             # Set bound box
             if obj.BoundBox == "BaseBoundBox":
@@ -281,30 +291,22 @@ class ObjectSurface(PathOp.ObjectOp):
                 bb = parentJob.Stock.Shape.BoundBox
 
             # Objective is to remove material from surface in StepDown layers rather than one pass to FinalDepth
+            # Create stl object via OCL
+            stl = ocl.STLSurf()
+            for f in mesh.Facets:
+                p = f.Points[0]
+                q = f.Points[1]
+                r = f.Points[2]
+                t = ocl.Triangle(ocl.Point(p[0], p[1], p[2]),
+                                 ocl.Point(q[0], q[1], q[2]),
+                                 ocl.Point(r[0], r[1], r[2]))
+                stl.addTriangle(t)
+
             final = []
             if obj.Algorithm == 'OCL Waterline':
                 self.reportThis("--CutMode: " + str(obj.CutMode))
-                stl = ocl.STLSurf()
-                for f in mesh.Facets:
-                    p = f.Points[0]
-                    q = f.Points[1]
-                    r = f.Points[2]
-                    t = ocl.Triangle(ocl.Point(p[0], p[1], p[2] + obj.DepthOffset.Value),
-                                     ocl.Point(q[0], q[1], q[2] + obj.DepthOffset.Value),
-                                     ocl.Point(r[0], r[1], r[2] + obj.DepthOffset.Value))
-                    stl.addTriangle(t)
                 final = self._waterlineOp(obj, stl, bb)
             elif obj.Algorithm == 'OCL Dropcutter':
-                # Create stl object via OCL
-                stl = ocl.STLSurf()
-                for f in mesh.Facets:
-                    p = f.Points[0]
-                    q = f.Points[1]
-                    r = f.Points[2]
-                    t = ocl.Triangle(ocl.Point(p[0], p[1], p[2]),
-                                     ocl.Point(q[0], q[1], q[2]),
-                                     ocl.Point(r[0], r[1], r[2]))
-                    stl.addTriangle(t)
 
                 # Rotate model back to original index
                 if obj.ScanType == 'Rotational':
@@ -1316,8 +1318,11 @@ class ObjectSurface(PathOp.ObjectOp):
         # Need to make DropCutterExtraOffset available for waterline algorithm
         # cdeoX = obj.DropCutterExtraOffset.x
         # cdeoY = obj.DropCutterExtraOffset.y
-        cdeoX = 0.6 * self.cutter.getDiameter()
-        cdeoY = 0.6 * self.cutter.getDiameter()
+        # TODO(gwicke): Removed cutter diameter offset, so that restricting
+        # the cut to the workpiece actually works. Use a larger workpiece to
+        # allow milling outside the model bbox.
+        cdeoX = 0 # 0.6 * self.cutter.getDiameter()
+        cdeoY = 0 # 0.6 * self.cutter.getDiameter()
 
         # the max and min XY area of the operation
         xmin = bb.XMin - cdeoX
@@ -1680,11 +1685,12 @@ class ObjectSurface(PathOp.ObjectOp):
         cmds = []
         msg = 'N (' + txt + ')'
         cmds.append(Path.Command(msg, {}))  # Raise cutter rapid to zMax in line of travel
-        cmds.append(Path.Command('G0', {'Z': zMax, 'F': self.vertRapid}))  # Raise cutter rapid to zMax in line of travel
+        # cmds.append(Path.Command('G0', {'Z': zMax, 'F': self.vertRapid}))  # Raise cutter rapid to zMax in line of travel
+        cmds.append(Path.Command('G0', {'Z': obj.SafeHeight.Value, 'F': self.vertRapid}))  # drop cutter down rapidly to prevDepth depth
         cmds.append(Path.Command('G0', {'X': p2.x, 'Y': p2.y, 'F': self.horizRapid}))  # horizontal rapid to current XY coordinate
         if zMax != pd:
-            cmds.append(Path.Command('G0', {'Z': pd, 'F': self.vertRapid}))  # drop cutter down rapidly to prevDepth depth
-            cmds.append(Path.Command('G0', {'Z': p2.z, 'F': self.vertFeed}))  # drop cutter down to current Z depth, returning to normal cut path and speed
+            # cmds.append(Path.Command('G0', {'Z': obj.SafeHeight.Value, 'F': self.vertRapid}))  # drop cutter down rapidly to prevDepth depth
+            cmds.append(Path.Command('G1', {'Z': p2.z, 'F': self.vertFeed}))  # drop cutter down to current Z depth, returning to normal cut path and speed
         return cmds
 
     def holdStopEndCmds(self, obj, p2, txt):
@@ -1824,6 +1830,11 @@ class ObjectSurface(PathOp.ObjectOp):
             # Default to standard end mill
             self.cutter = ocl.CylCutter(diam_1, (CEH + lenOfst))
             PathLog.info("Defaulting cutter to standard end mill.")
+
+        depthOffset = obj.DepthOffset.Value
+        if depthOffset > 0:
+            self.reportThis("--Applying DepthOffset " + str(depthOffset))
+            self.cutter = self.cutter.offsetCutter(depthOffset)
 
         # http://www.carbidecutter.net/products/carbide-burr-cone-shape-sm.html
         '''

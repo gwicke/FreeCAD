@@ -286,7 +286,9 @@ class CommandPathPost:
             # Order by fixture means all operations and tool changes will be completed in one
             # fixture before moving to the next.
 
-            currTool = None
+            genArgs = {
+                "currTool": None
+            }
             for f in wcslist:
                 # create an object to serve as the fixture path
                 fobj = _TempObject()
@@ -297,15 +299,16 @@ class CommandPathPost:
                 sublist = [fobj]
 
                 # Now generate the gcode
-                for obj in job.Operations.Group:
-                    tc = PathUtil.toolControllerForOp(obj)
-                    if tc is not None:
-                        if tc.ToolNumber != currTool:
-                            sublist.append(tc)
-                            PathLog.debug("Appending TC: {}".format(tc.Name))
-                            currTool = tc.ToolNumber
-                    sublist.append(obj)
-                postlist.append(sublist)
+                def genSubList(job, genArgs):
+                    for obj in job.Operations.Group:
+                        tc = PathUtil.toolControllerForOp(obj)
+                        if tc is not None:
+                            if tc.ToolNumber != genArgs["currTool"]:
+                                yield tc
+                                PathLog.debug("Appending TC: {}".format(tc.Name))
+                                genArgs["currTool"] = tc.ToolNumber
+                        yield obj
+                postlist.append(genSubList(job, genArgs))
 
         elif orderby == 'Tool':
             PathLog.debug("Ordering by Tool")
@@ -386,7 +389,7 @@ class CommandPathPost:
             for slist in postlist:
                 (fail, rc) = self.exportObjectsWith(slist, job)
         else:
-            finalpostlist = [item for slist in postlist for item in slist]
+            finalpostlist = (item for slist in postlist for item in slist)
             (fail, rc) = self.exportObjectsWith(finalpostlist, job)
 
         self.subpart = 1

@@ -484,11 +484,11 @@ def drill_translate(outstring, cmd, params):
     trBuff += linenumber() + "G90" + "\n"  # Force des deplacements en coordonnees absolues pendant les cycles
 
   # Mouvement(s) preliminaire(s))
-  if CURRENT_Z < RETRACT_Z:
-    trBuff += linenumber() + 'G0 Z' + format(float(RETRACT_Z.getValueAs(UNIT_FORMAT)), strFormat) + "\n"
-  trBuff += linenumber() + 'G0 X' + format(float(drill_X.getValueAs(UNIT_FORMAT)), strFormat) + ' Y' + format(float(drill_Y.getValueAs(UNIT_FORMAT)), strFormat) + "\n"
   if CURRENT_Z > RETRACT_Z:
     trBuff += linenumber() + 'G0 Z' + format(float(CURRENT_Z.getValueAs(UNIT_FORMAT)), strFormat) + "\n"
+  trBuff += linenumber() + 'G0 X' + format(float(drill_X.getValueAs(UNIT_FORMAT)), strFormat) + ' Y' + format(float(drill_Y.getValueAs(UNIT_FORMAT)), strFormat) + "\n"
+  if CURRENT_Z < RETRACT_Z:
+    trBuff += linenumber() + 'G1 Z' + format(float(RETRACT_Z.getValueAs(UNIT_FORMAT)), strFormat) + ' F' + format(float(drill_Speed.getValueAs(UNIT_SPEED_FORMAT)), '.2f') + "\n"
 
   # Mouvement de percage
   if cmd in ('G81', 'G82'):
