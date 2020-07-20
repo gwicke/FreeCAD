@@ -65,9 +65,9 @@
        </widget>
       </item>
       <item row="12" column="0">
-       <widget class="QLabel" name="sampleInterval_label">
+       <widget class="QLabel" name="geometryTolerance_label">
         <property name="text">
-         <string>Sample interval</string>
+         <string>Geometry tolerance</string>
         </property>
        </widget>
       </item>
@@ -102,9 +102,10 @@
        </layout>
       </item>
       <item row="12" column="1" colspan="2">
-       <widget class="Gui::InputField" name="sampleInterval">
+       <widget class="Gui::InputField" name="geometryTolerance">
         <property name="toolTip">
-         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Set the sampling resolution. Smaller values quickly increase processing time.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Set the geometry
+             tolerance for this operation. Very small values (less than 0.01mm) quickly increase processing time.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="unit" stdset="0">
          <string notr="true">mm</string>

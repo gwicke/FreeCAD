@@ -41,7 +41,7 @@ DraftGeomUtils = LazyLoader('DraftGeomUtils', globals(), 'DraftGeomUtils')
 Part = LazyLoader('Part', globals(), 'Part')
 TechDraw = LazyLoader('TechDraw', globals(), 'TechDraw')
 
-PathLog.setLevel(PathLog.Level.INFO, PathLog.thisModule())
+PathLog.setLevel(PathLog.Level.DEBUG, PathLog.thisModule())
 #PathLog.trackModule(PathLog.thisModule())
 
 
@@ -286,7 +286,7 @@ def makeWorkplane(shape):
     return c
 
 
-def getEnvelope(partshape, subshape=None, depthparams=None):
+def getEnvelope(partshape, subshape=None, depthparams=None, offset=0):
     '''
     getEnvelope(partshape, stockheight=None)
     returns a shape corresponding to the partshape silhouette extruded to height.
@@ -299,39 +299,33 @@ def getEnvelope(partshape, subshape=None, depthparams=None):
 
     zShift = 0
     if subshape is not None:
-        if isinstance(subshape, Part.Face):
-            PathLog.debug('processing a face')
-            sec = Part.makeCompound([subshape])
-        else:
-            area = Path.Area(Fill=2, Coplanar=0).add(subshape)
-            area.setPlane(makeWorkplane(partshape))
-            PathLog.debug("About to section with params: {}".format(area.getParams()))
-            sec = area.makeSections(heights=[0.0], project=True)[0].getShape()
+        sec = getOffsetArea(subshape, offset)
 
-        PathLog.debug('partshapeZmin: {}, subshapeZMin: {}, zShift: {}'.format(partshape.BoundBox.ZMin, subshape.BoundBox.ZMin, zShift))
+        PathLog.debug('partshapeZmin: {}, subshapeZMin: {}, zShift: {}'.format(
+            partshape.BoundBox.ZMin, subshape.BoundBox.ZMin, zShift))
 
     else:
-        area = Path.Area(Fill=2, Coplanar=0).add(partshape)
-        area.setPlane(makeWorkplane(partshape))
-        sec = area.makeSections(heights=[0.0], project=True)[0].getShape()
+        sec = getOffsetArea(partshape, offset)
 
     # If depthparams are passed, use it to calculate bottom and height of
     # envelope
     if depthparams is not None:
         eLength = depthparams.safe_height - depthparams.final_depth
-        zShift = depthparams.final_depth - sec.BoundBox.ZMin
-        PathLog.debug('boundbox zMIN: {} elength: {} zShift {}'.format(partshape.BoundBox.ZMin, eLength, zShift))
+        zShift = depthparams.safe_height
+        PathLog.debug('boundbox zMIN: {} elength: {} zShift {}'.format(
+            partshape.BoundBox.ZMin, eLength, zShift))
     else:
-        eLength = partshape.BoundBox.ZLength - sec.BoundBox.ZMin
+        eLength = partshape.BoundBox.ZLength
 
+    # Extrude the section to desired depth
+    envelopeshape = sec.extrude(FreeCAD.Vector(0, 0, -eLength))
     # Shift the section based on selection and depthparams.
-    newPlace = FreeCAD.Placement(FreeCAD.Vector(0, 0, zShift), sec.Placement.Rotation)
-    sec.Placement = newPlace
-
-    # Extrude the section to top of Boundbox or desired height
-    envelopeshape = sec.extrude(FreeCAD.Vector(0, 0, eLength))
-    if PathLog.getLevel(PathLog.thisModule()) == PathLog.Level.DEBUG:
-        removalshape = FreeCAD.ActiveDocument.addObject("Part::Feature", "Envelope")
+    newPlace = FreeCAD.Placement(FreeCAD.Vector(0, 0, zShift),
+                                 sec.Placement.Rotation)
+    envelopeshape.Placement = newPlace
+    if False and PathLog.getLevel(PathLog.thisModule()) == PathLog.Level.DEBUG:
+        removalshape = FreeCAD.ActiveDocument.addObject(
+            "Part::Feature", "Envelope")
         removalshape.Shape = envelopeshape
     return envelopeshape
 
@@ -360,12 +354,12 @@ def getOffsetArea(fcShape,
     areaParams['OpenMode'] = 0
     areaParams['MaxArcPoints'] = 400  # 400
     areaParams['Project'] = True
-    # areaParams['FitArcs'] = False  # Can be buggy & expensive
+    areaParams['FitArcs'] = False  # Can be buggy & expensive
     areaParams['Deflection'] = tolerance
     areaParams['Accuracy'] = tolerance
     areaParams['Tolerance'] = 1e-5  # Equal point tolerance
     areaParams['Simplify'] = True
-    areaParams['CleanDistance'] = tolerance / 2
+    areaParams['CleanDistance'] = tolerance / 5
 
     area = Path.Area()  # Create instance of Area() class object
     # Set working plane normal to Z=1
@@ -914,3 +908,41 @@ class depth_params(object):
             return depths
         else:
             return [stop] + depths
+
+
+def simplify3dLine(line, tolerance=1e-4):
+    """Simplify a line defined by a list of App.Vectors, while keeping the
+    maximum deviation from the original line within the defined tolerance.
+    Implementation of
+    https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm"""
+    stack = [(0, len(line) - 1)]
+    results = []
+
+    def processRange(start, end):
+        """Internal worker. Process a range of Vector indices within the
+        line."""
+        if end - start < 2:
+            results.extend(line[start:end])
+            return
+        # Find point with maximum distance
+        maxIndex, maxDistance = 0, 0.0
+        startPoint, endPoint = (line[start], line[end])
+        for i in range(start + 1, end):
+            v = line[i]
+            distance = v.distanceToLineSegment(startPoint, endPoint).Length
+            if distance > maxDistance:
+                maxDistance = distance
+                maxIndex = i
+        if maxDistance > tolerance:
+            # Push second branch first, to be executed last
+            stack.append((maxIndex, end))
+            stack.append((start, maxIndex))
+        else:
+            results.append(line[start])
+
+    while len(stack):
+        processRange(*stack.pop())
+    # Each segment only appended its start point to the final result, so fill in
+    # the last point.
+    results.append(line[-1])
+    return results

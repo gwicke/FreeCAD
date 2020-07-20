@@ -60,7 +60,7 @@ Part = LazyLoader('Part', globals(), 'Part')
 if FreeCAD.GuiUp:
     import FreeCADGui
 
-PathLog.setLevel(PathLog.Level.INFO, PathLog.thisModule())
+PathLog.setLevel(PathLog.Level.DEBUG, PathLog.thisModule())
 # PathLog.trackModule(PathLog.thisModule())
 
 
@@ -123,8 +123,6 @@ class ObjectSurface(PathOp.ObjectOp):
             ("App::PropertyBool", "ShowTempObjects", "Debug",
                 QtCore.QT_TRANSLATE_NOOP("App::Property", "Show the temporary path construction objects when module is in DEBUG mode.")),
 
-            ("App::PropertyDistance", "AngularDeflection", "Mesh Conversion",
-                QtCore.QT_TRANSLATE_NOOP("App::Property", "Smaller values yield a finer, more accurate mesh. Smaller values increase processing time a lot.")),
             ("App::PropertyDistance", "LinearDeflection", "Mesh Conversion",
                 QtCore.QT_TRANSLATE_NOOP("App::Property", "Smaller values yield a finer, more accurate mesh. Smaller values do not increase processing time much.")),
 
@@ -179,6 +177,14 @@ class ObjectSurface(PathOp.ObjectOp):
                 QtCore.QT_TRANSLATE_NOOP("App::Property", "Choose location of the center point for starting the cut pattern.")),
             ("App::PropertyEnumeration", "ProfileEdges", "Clearing Options",
                 QtCore.QT_TRANSLATE_NOOP("App::Property", "Profile the edges of the selection.")),
+            ("App::PropertyDistance", "GeometryTolerance", "Clearing Options",
+             QtCore.QT_TRANSLATE_NOOP(
+                 "App::Property",
+                 "Set the geometry tolerance for the operation. "
+                 "Very small values (<0.01mm) quickly increase processing time. "
+                 "Changing this value updates sample intervals, tessellation "
+                 "tolerance and other parameters."
+             )),
             ("App::PropertyDistance", "SampleInterval", "Clearing Options",
                 QtCore.QT_TRANSLATE_NOOP("App::Property", "Set the sampling resolution. Smaller values quickly increase processing time.")),
             ("App::PropertyFloat", "StepOver", "Clearing Options",
@@ -217,8 +223,8 @@ class ObjectSurface(PathOp.ObjectOp):
         }
 
     def opPropertyDefaults(self, obj, job):
-        '''opPropertyDefaults(obj, job) ... returns a dictionary of default values
-        for the operation's properties.'''
+        '''opPropertyDefaults(obj, job) ... returns a dictionary of default
+        values for the operation's properties.'''
         defaults = {
             'OptimizeLinearPaths': True,
             'InternalFeaturesCut': True,
@@ -249,30 +255,36 @@ class ObjectSurface(PathOp.ObjectOp):
             'AvoidLastX_Faces': 0,
             'PatternCenterCustom': FreeCAD.Vector(0.0, 0.0, 0.0),
             'GapThreshold': 0.005,
-            'AngularDeflection': 0.25, # AngularDeflection is unused
              # Reasonable compromise between speed & precision
             'LinearDeflection': 0.001,
             # For debugging
-            'ShowTempObjects': False
+            'ShowTempObjects': False,
+            'GeometryTolerance': 0.1,
         }
 
-        warn = True
-        if hasattr(job, 'GeometryTolerance'):
-            if job.GeometryTolerance.Value != 0.0:
-                warn = False
-                # Tessellation precision dictates the offsets we need to add to
-                # avoid false collisions with the model mesh, so make sure we
-                # default to tessellating with greater precision than the target
-                # GeometryTolerance.
-                defaults['LinearDeflection'] = job.GeometryTolerance.Value / 4
-        if warn:
+        if not hasattr(
+                job,
+                'GeometryTolerance') or job.GeometryTolerance.Value == 0.0:
             msg = translate('PathSurface',
                             'The GeometryTolerance for this Job is 0.0.')
             msg += translate('PathSurface',
-                             'Initializing LinearDeflection to 0.001 mm.')
+                             'Initializing GeometryTolerance to 0.1 mm.')
             FreeCAD.Console.PrintWarning(msg + '\n')
-
+        else:
+            defaults['GeometryTolerance'] = job.GeometryTolerance.Value
         return defaults
+
+    def geometryToleranceUpdates(self, obj):
+        tolerance = obj.GeometryTolerance.Value
+        # Tessellation precision dictates the offsets we need to add to
+        # avoid false collisions with the model mesh, so make sure we
+        # default to tessellating with greater precision than the target
+        # GeometryTolerance.
+        obj.LinearDeflection.Value = tolerance / 5
+        # Since we are using adaptive sampling, choose a default sample interval
+        # on the order of tool diameter / 10.
+        obj.SampleInterval = (tolerance * 10 +
+                              obj.ToolController.Tool.Diameter / 10) / 2
 
     def setEditorProperties(self, obj):
         # Used to hide inputs in properties list
@@ -299,18 +311,22 @@ class ObjectSurface(PathOp.ObjectOp):
         obj.setEditorMode('CutPatternAngle', P0)
         obj.setEditorMode('PatternCenterAt', P2)
         obj.setEditorMode('PatternCenterCustom', P2)
+        # Unused
+        # obj.setEditorMode('AngularDeflection', P2)
 
     def onChanged(self, obj, prop):
         if hasattr(self, 'propertiesReady'):
             if self.propertiesReady:
                 if prop in ['ScanType', 'CutPattern']:
                     self.setEditorProperties(obj)
+                elif prop == 'GeometryTolerance' and 'Restore' not in obj.State:
+                    self.geometryToleranceUpdates(obj)
 
     def opOnDocumentRestored(self, obj):
-        self.propertiesReady = False
         job = PathUtils.findParentJob(obj)
 
         self.initOpProperties(obj, warn=True)
+        self.propertiesReady = False
         self.opApplyPropertyDefaults(obj, job, self.addNewProps)
 
         mode = 2 if PathLog.getLevel(PathLog.thisModule()) != 4 else 0
@@ -328,6 +344,7 @@ class ObjectSurface(PathOp.ObjectOp):
                 setattr(obj, n, val)
 
         self.setEditorProperties(obj)
+        self.propertiesReady = True
 
     def opApplyPropertyDefaults(self, obj, job, propList):
         # Set standard property defaults
@@ -592,21 +609,47 @@ class ObjectSurface(PathOp.ObjectOp):
 
             for m in range(0, len(JOB.Model.Group)):
                 # Create OCL.stl model objects
-                PathSurfaceSupport._prepareModelSTLs(self, JOB, obj, m, ocl)
+                # PathSurfaceSupport._prepareModelSTLs(self, JOB, obj, m, ocl)
 
                 Mdl = JOB.Model.Group[m]
                 if FACES[m]:
-                    PathLog.debug('Working on Model.Group[{}]: {}'.format(m, Mdl.Label))
+                    PathLog.debug('Working on Model.Group[{}]: {}'.format(
+                        m, Mdl.Label))
                     if m > 0:
                         # Raise to clearance between models
-                        CMDS.append(Path.Command('N (Transition to base: {}.)'.format(Mdl.Label)))
-                        CMDS.append(Path.Command('G0', {'Z': obj.ClearanceHeight.Value, 'F': self.vertRapid}))
-                    # make stock-model-voidShapes STL model for avoidance detection on transitions
-                    PathSurfaceSupport._makeSafeSTL(self, JOB, obj, m, FACES[m], VOIDS[m], ocl)
+                        CMDS.append(
+                            Path.Command('N (Transition to base: {}.)'.format(
+                                Mdl.Label)))
+                        CMDS.append(
+                            Path.Command(
+                                'G0', {
+                                    'Z': obj.ClearanceHeight.Value,
+                                    'F': self.vertRapid
+                                }))
+                    # Prepare cut areas first
+                    cutAreas = self._makeCutAreas(JOB, obj, m, FACES[m],
+                                                  VOIDS[m])
+
+                    # make stock-model-voidShapes STL model for collision
+                    # detection on transitions
+                    PathSurfaceSupport._makeSafeSTL(self, JOB, obj, m,
+                                                    cutAreas, ocl,
+                                                    self.depthParams)
                     # Process model/faces - OCL objects must be ready
-                    CMDS.extend(self._processCutAreas(JOB, obj, m, FACES[m], VOIDS[m]))
+                    if obj.ScanType == 'Planar':
+                        for i, cutArea in enumerate(cutAreas):
+                            if not cutArea:
+                                continue
+                            CMDS.extend(
+                                self._processPlanarOp(JOB, obj, m, cutArea, i))
+                    elif obj.ScanType == 'Rotational':
+                        for cutArea in cutAreas:
+                            CMDS.extend(
+                                self._processRotationalOp(
+                                    JOB, obj, m, cutArea))
                 else:
-                    PathLog.debug('No data for model base: {}'.format(JOB.Model.Group[m].Label))
+                    PathLog.debug('No data for model base: {}'.format(
+                        JOB.Model.Group[m].Label))
 
             # Save gcode produced
             self.commandlist.extend(CMDS)
@@ -690,13 +733,11 @@ class ObjectSurface(PathOp.ObjectOp):
         return True
 
     # Methods for constructing the cut area and creating path geometry
-    def _processCutAreas(self, JOB, obj, mdlIdx, FCS, VDS):
+    def _makeCutAreas(self, JOB, obj, mdlIdx, FCS, VDS):
         '''_processCutAreas(JOB, obj, mdlIdx, FCS, VDS)...
         This method applies any avoided faces or regions to the selected faces.
         It then calls the correct scan method depending on the ScanType property.'''
         PathLog.debug('_processCutAreas()')
-
-        final = list()
 
         # Process faces Collectively or Individually
         if obj.HandleMultipleFeatures == 'Collectively':
@@ -710,14 +751,11 @@ class ObjectSurface(PathOp.ObjectOp):
                 else:
                     COMP = ADD
 
-            if obj.ScanType == 'Planar':
-                final.extend(self._processPlanarOp(JOB, obj, mdlIdx, COMP, 0))
-            elif obj.ScanType == 'Rotational':
-                final.extend(self._processRotationalOp(JOB, obj, mdlIdx, COMP))
+            return [COMP]
 
         elif obj.HandleMultipleFeatures == 'Individually':
-            for fsi in range(0, len(FCS)):
-                fShp = FCS[fsi]
+            cutFaces = []
+            for fsi, fShp in enumerate(FCS):
                 # self.deleteOpVariables(all=False)
                 self.resetOpVariables(all=False)
 
@@ -730,15 +768,10 @@ class ObjectSurface(PathOp.ObjectOp):
                         COMP = ADD.cut(DEL)
                     else:
                         COMP = ADD
-
-                if obj.ScanType == 'Planar':
-                    final.extend(self._processPlanarOp(JOB, obj, mdlIdx, COMP, fsi))
-                elif obj.ScanType == 'Rotational':
-                    final.extend(self._processRotationalOp(JOB, obj, mdlIdx, COMP))
+                cutFaces.append(COMP)
                 COMP = None
+            return cutFaces
         # Eif
-
-        return final
 
     def _processPlanarOp(self, JOB, obj, mdlIdx, cmpdShp, fsi):
         '''_processPlanarOp(JOB, obj, mdlIdx, cmpdShp)...
@@ -765,8 +798,9 @@ class ObjectSurface(PathOp.ObjectOp):
         lenDP = len(depthparams)
 
         # Prepare PathDropCutter objects with STL data
-        pdc = self._planarGetPDC(self.modelSTLs[mdlIdx], depthparams[lenDP - 1], obj.SampleInterval.Value, self.cutter)
+        # pdc = self._planarGetPDC(self.modelSTLs[mdlIdx], depthparams[lenDP - 1], obj.SampleInterval.Value, self.cutter)
         safePDC = self._planarGetPDC(self.safeSTLs[mdlIdx], depthparams[lenDP - 1], obj.SampleInterval.Value, self.cutter)
+        pdc = safePDC
 
         profScan = list()
         if obj.ProfileEdges != 'None':
@@ -823,10 +857,6 @@ class ObjectSurface(PathOp.ObjectOp):
             msg = translate('PathSuface', 'No scan data to convert to Gcode.')
             PathLog.error(msg)
             return list()
-
-        # Apply depth offset
-        if obj.DepthOffset.Value != 0.0:
-            self._planarApplyDepthOffset(SCANDATA, obj.DepthOffset.Value)
 
         # If cut pattern is `Circular`, there are zero(almost zero) straight lines to optimize
         # Store initial `OptimizeLinearPaths` value for later restoration
@@ -1074,11 +1104,16 @@ class ObjectSurface(PathOp.ObjectOp):
                     obj.OptimizeLinearPaths = False
         # Efor
 
+        # Apply depth offset
+        if obj.DepthOffset.Value != 0.0:
+            self._planarApplyDepthOffset(GCODE, obj.DepthOffset.Value)
+
         return GCODE
 
     def _planarSinglepassProcess(self, obj, points):
         if obj.OptimizeLinearPaths:
-            points = self._optimizeLinearSegments(points)
+            points = PathUtils.simplify3dLine(points,
+                    tolerance=obj.LinearDeflection.Value)
         # Begin processing ocl points list into gcode
         commands = []
         for pnt in points:
@@ -1257,6 +1292,10 @@ class ObjectSurface(PathOp.ObjectOp):
             # Set previous depth
             prevDepth = lyrDep
         # Efor
+
+        # Apply depth offset
+        if obj.DepthOffset.Value != 0.0:
+            self._planarApplyDepthOffset(GCODE, obj.DepthOffset.Value)
 
         PathLog.debug('Multi-pass op has {} layers (step downs).'.format(lyr + 1))
 
@@ -1503,25 +1542,19 @@ class ObjectSurface(PathOp.ObjectOp):
 
         return (coPlanar, cmds)
 
-    def _planarApplyDepthOffset(self, SCANDATA, DepthOffset):
+    def _planarApplyDepthOffset(self, gcode, DepthOffset):
         PathLog.debug('Applying DepthOffset value: {}'.format(DepthOffset))
-        lenScans = len(SCANDATA)
-        for s in range(0, lenScans):
-            SO = SCANDATA[s]  # StepOver
-            numParts = len(SO)
-            for prt in range(0, numParts):
-                PRT = SO[prt]
-                if PRT != 'BRK':
-                    numPts = len(PRT)
-                    for pt in range(0, numPts):
-                        SCANDATA[s][prt][pt].z += DepthOffset
+        for code in gcode:
+            if isinstance(code, Path.Command) and code.z is not None:
+                code.z += DepthOffset
 
     def _planarGetPDC(self, stl, finalDep, SampleInterval, cutter):
-        pdc = ocl.PathDropCutter()   # create a pdc [PathDropCutter] object
+        pdc = ocl.AdaptivePathDropCutter()   # create a pdc [PathDropCutter] object
         pdc.setSTL(stl)  # add stl model
         pdc.setCutter(cutter)  # add cutter
         pdc.setZ(finalDep)  # set minimumZ (final / target depth value)
         pdc.setSampling(SampleInterval)  # set sampling size
+        pdc.setMinSampling(SampleInterval / 20)  # min sampling interval
         return pdc
 
 
@@ -2085,28 +2118,14 @@ class ObjectSurface(PathOp.ObjectOp):
             PathLog.warning("Defaulting cutter to standard end mill.")
             return ocl.CylCutter(diam_1, (CEH + lenOfst))
 
-    def _optimizeLinearSegments(self, line):
-        """Eliminate collinear interior segments"""
-        if len(line) > 2:
-            prv, pnt = line[0:2]
-            pts = [prv]
-            for nxt in line[2:]:
-                if not pnt.isOnLineSegment(prv, nxt):
-                    pts.append(pnt)
-                prv = pnt
-                pnt = nxt
-            pts.append(line[-1])
-            return pts
-        else:
-            return line
-
     def _getTransitionLine(self, pdc, p1, p2, obj):
         """Use an OCL PathDropCutter to generate a safe transition path between
         two points in the x/y plane."""
         p1xy, p2xy = ((p1.x, p1.y), (p2.x, p2.y))
         pdcLine = self._planarDropCutScan(pdc, p1xy, p2xy)
         if obj.OptimizeLinearPaths:
-            pdcLine = self._optimizeLinearSegments(pdcLine)
+            pdcLine = PathUtils.simplify3dLine( pdcLine,
+                    tolerance=obj.LinearDeflection.Value)
         zs = [obj.z for obj in pdcLine]
         # PDC z values are based on the model, and do not take into account
         # any remaining stock / multi layer paths. Adjust raw PDC z values to
@@ -2135,7 +2154,7 @@ def SetupProperties():
     setup.extend(['HandleMultipleFeatures', 'LayerMode', 'OptimizeStepOverTransitions'])
     setup.extend(['ProfileEdges', 'BoundaryEnforcement', 'RotationAxis', 'SampleInterval'])
     setup.extend(['ScanType', 'StartIndex', 'StartPoint', 'StepOver', 'StopIndex'])
-    setup.extend(['UseStartPoint', 'AngularDeflection', 'LinearDeflection', 'ShowTempObjects'])
+    setup.extend(['UseStartPoint', 'GeometryTolerance', 'LinearDeflection', 'ShowTempObjects'])
     return setup
 
 

@@ -43,7 +43,7 @@ from lazy_loader.lazy_loader import LazyLoader
 Part = LazyLoader('Part', globals(), 'Part')
 
 
-PathLog.setLevel(PathLog.Level.INFO, PathLog.thisModule())
+PathLog.setLevel(PathLog.Level.DEBUG, PathLog.thisModule())
 # PathLog.trackModule(PathLog.thisModule())
 
 
@@ -387,6 +387,9 @@ class PathGeometryGenerator:
         offset = 0.0  # Start right at the edge of cut area
         while True:
             offsetArea = PathUtils.getOffsetArea(shape, offset, plane=self.wpc)
+            if (offset == 0):
+                # Speed up successive offsets by using the zero offset as base
+                shape = offsetArea
             if not offsetArea:
                 # Area fully consumed
                 break
@@ -899,6 +902,12 @@ class ProcessSelectedFaces:
         try:
             # Use Area based implementation
             shapes = Part.makeCompound([t[0] for t in shapeAndIndexTuples])
+            # Try to make a shell first
+            try:
+                shapes = Part.makeShell(shapes.Faces).removeSplitter()
+            except Exception as e:
+                PathLog.warning(e)
+            # Part.show(shapes, 'inputShapes')
             outlineShape = PathUtils.getOffsetArea(
                 shapes,
                 # Make the outline very slightly smaller, to avoid creating
@@ -914,6 +923,9 @@ class ProcessSelectedFaces:
                 removeHoles=False,  # Projection has holes preserved
                 tolerance=tolerance,
                 plane=self.wpc)
+            if not outlineShape:
+                return ([], [])
+
             internalShape = outlineShape.cut(projectionShape)
             # Filter out tiny faces, usually artifacts around the perimeter of
             # the cut.
@@ -1099,7 +1111,7 @@ def _prepareModelSTLs(self, JOB, obj, m, ocl):
             self.modelSTLs[m] = _makeSTL(model, obj, ocl, self.modelTypes[m])
 
 
-def _makeSafeSTL(self, JOB, obj, mdlIdx, faceShapes, voidShapes, ocl):
+def _makeSafeSTL(self, JOB, obj, mdlIdx, faceShapes, ocl, depthParams=None):
     '''_makeSafeSTL(JOB, obj, mdlIdx, faceShapes, voidShapes)...
     Creates and OCL.stl object with combined data with waste stock,
     model, and avoided faces.  Travel lines can be checked against this
@@ -1114,41 +1126,11 @@ def _makeSafeSTL(self, JOB, obj, mdlIdx, faceShapes, voidShapes, ocl):
     # add Model shape to safeSTL shape
     fuseShapes.append(Mdl.Shape)
 
-    if obj.BoundBox == 'BaseBoundBox':
-        cont = False
-        extFwd = (sBB.ZLength)
-        zmin = mBB.ZMin
-        zmax = mBB.ZMin + extFwd
-        stpDwn = (zmax - zmin) / 4.0
-        dep_par = PathUtils.depth_params(zmax + 5.0, zmax + 3.0, zmax, stpDwn, 0.0, zmin)
-
-        try:
-            envBB = PathUtils.getEnvelope(partshape=Mdl.Shape, depthparams=dep_par)  # Produces .Shape
-            cont = True
-        except Exception as ee:
-            PathLog.error(str(ee))
-            shell = Mdl.Shape.Shells[0]
-            solid = Part.makeSolid(shell)
-            try:
-                envBB = PathUtils.getEnvelope(partshape=solid, depthparams=dep_par)  # Produces .Shape
-                cont = True
-            except Exception as eee:
-                PathLog.error(str(eee))
-
-        if cont:
-            stckWst = JOB.Stock.Shape.cut(envBB)
-            if obj.BoundaryAdjustment > 0.0:
-                cmpndFS = Part.makeCompound(faceShapes)
-                baBB = PathUtils.getEnvelope(partshape=cmpndFS, depthparams=self.depthParams)  # Produces .Shape
-                adjStckWst = stckWst.cut(baBB)
-            else:
-                adjStckWst = stckWst
-            fuseShapes.append(adjStckWst)
-        else:
-            msg = translate('PathSurfaceSupport',
-                'Path transitions might not avoid the model. Verify paths.')
-            FreeCAD.Console.PrintWarning(msg + '\n')
-    else:
+    # Offset cut area by cutter radius and some tolerance
+    # TODO(gwicke): Increase precision by directly generating the cut area
+    # outline face in makeCutAreas, rather than offsetting an offsetted face.
+    offset = self.radius + obj.LinearDeflection.Value
+    if obj.BoundBox != 'BaseBoundBox':
         # If boundbox is Job.Stock, add hidden pad under stock as base plate
         toolDiam = self.cutter.getDiameter()
         zMin = JOB.Stock.Shape.BoundBox.ZMin
@@ -1158,19 +1140,24 @@ def _makeSafeSTL(self, JOB, obj, mdlIdx, faceShapes, voidShapes, ocl):
         bW = JOB.Stock.Shape.BoundBox.YLength + (2 * toolDiam)
         bH = 1.0
         crnr = FreeCAD.Vector(xMin, yMin, zMin - 1.0)
-        B = Part.makeBox(bL, bW, bH, crnr, FreeCAD.Vector(0, 0, 1))
-        fuseShapes.append(B)
-
-    if voidShapes:
-        voidComp = Part.makeCompound(voidShapes)
-        voidEnv = PathUtils.getEnvelope(partshape=voidComp, depthparams=self.depthParams)  # Produces .Shape
-        fuseShapes.append(voidEnv)
-
+        fuseShapes.append(
+            Part.makeBox(bL, bW, bH, crnr, FreeCAD.Vector(0, 0, 1)))
+    stock = JOB.Stock.Shape
+    envBB = PathUtils.getEnvelope(partshape=Part.makeCompound(faceShapes),
+                                  depthparams=depthParams,
+                                  offset=offset)  # Produces .Shape
+    fuseShapes.append(stock.cut(envBB))
     fused = Part.makeCompound(fuseShapes)
 
     if self.showDebugObjects:
         T = FreeCAD.ActiveDocument.addObject('Part::Feature', 'safeSTLShape')
         T.Shape = fused
+        T.purgeTouched()
+        self.tempGroup.addObject(T)
+
+        T = FreeCAD.ActiveDocument.addObject('Part::Feature',
+                                             'safeSTLEnvelope')
+        T.Shape = envBB
         T.purgeTouched()
         self.tempGroup.addObject(T)
 
@@ -1193,8 +1180,11 @@ def _makeSTL(model, obj, ocl, model_type=None):
         facets = ((vertices[f[0]], vertices[f[1]], vertices[f[2]])
                   for f in facet_indices)
     stl = ocl.STLSurf()
+    finalDepth = obj.FinalDepth.Value
     for tri in facets:
         v1, v2, v3 = tri
+        if v1[2] < finalDepth and v2[2] < finalDepth and v2[2] < finalDepth:
+            continue
         t = ocl.Triangle(ocl.Point(v1[0], v1[1], v1[2]),
                          ocl.Point(v2[0], v2[1], v2[2]),
                          ocl.Point(v3[0], v3[1], v3[2]))

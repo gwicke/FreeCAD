@@ -97,7 +97,8 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         if obj.StepOver != self.form.stepOver.value():
             obj.StepOver = self.form.stepOver.value()
 
-        PathGui.updateInputField(obj, 'SampleInterval', self.form.sampleInterval)
+        PathGui.updateInputField(obj, 'GeometryTolerance',
+                self.form.geometryTolerance)
 
         if obj.UseStartPoint != self.form.useStartPoint.isChecked():
             obj.UseStartPoint = self.form.useStartPoint.isChecked()
@@ -137,7 +138,9 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         self.selectInComboBox(obj.DropCutterDir, self.form.dropCutterDirSelect)
         self.form.depthOffset.setText(FreeCAD.Units.Quantity(obj.DepthOffset.Value, FreeCAD.Units.Length).UserString)
         self.form.stepOver.setValue(obj.StepOver)
-        self.form.sampleInterval.setText(FreeCAD.Units.Quantity(obj.SampleInterval.Value, FreeCAD.Units.Length).UserString)
+        self.form.geometryTolerance.setText(
+            FreeCAD.Units.Quantity(obj.GeometryTolerance.Value,
+                                   FreeCAD.Units.Length).UserString)
 
         if obj.UseStartPoint:
             self.form.useStartPoint.setCheckState(QtCore.Qt.Checked)
@@ -172,7 +175,7 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         signals.append(self.form.dropCutterDirSelect.currentIndexChanged)
         signals.append(self.form.depthOffset.editingFinished)
         signals.append(self.form.stepOver.editingFinished)
-        signals.append(self.form.sampleInterval.editingFinished)
+        signals.append(self.form.geometryTolerance.editingFinished)
         signals.append(self.form.useStartPoint.stateChanged)
         signals.append(self.form.optimizeEnabled.stateChanged)
         signals.append(self.form.optimizeStepOverTransitions.stateChanged)

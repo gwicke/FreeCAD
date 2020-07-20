@@ -47,7 +47,7 @@ static PyObject * areaSetParams(PyObject *, PyObject *args, PyObject *kwd) {
 
     static char *kwlist[] = {PARAM_FIELD_STRINGS(NAME,AREA_PARAMS_STATIC_CONF),NULL};
 
-    if(args && PySequence_Size(args)>0) 
+    if(args && PySequence_Size(args)>0)
         PyErr_SetString(PyExc_ValueError,"Non-keyword argument is not supported");
 
     //Declare variables defined in the NAME field of the CONF parameter list
@@ -61,9 +61,9 @@ static PyObject * areaSetParams(PyObject *, PyObject *args, PyObject *kwd) {
     //populate the CONF variables with params
     PARAM_FOREACH(AREA_SET,AREA_PARAMS_STATIC_CONF)
 
-    //Parse arguments to overwrite CONF variables 
-    if (!PyArg_ParseTupleAndKeywords(args, kwd, 
-                "|" PARAM_PY_KWDS(AREA_PARAMS_STATIC_CONF), kwlist, 
+    //Parse arguments to overwrite CONF variables
+    if (!PyArg_ParseTupleAndKeywords(args, kwd,
+                "|" PARAM_PY_KWDS(AREA_PARAMS_STATIC_CONF), kwlist,
                 PARAM_REF(PARAM_FNAME,AREA_PARAMS_STATIC_CONF)))
         return 0;
 
@@ -97,10 +97,10 @@ static PyObject * areaGetParamsDesc(PyObject *, PyObject *args, PyObject *kwd) {
         return 0;
 
 #if PY_MAJOR_VERSION < 3
-    if(PyObject_IsTrue(pcObj)) 
+    if(PyObject_IsTrue(pcObj))
         return PyString_FromString(PARAM_PY_DOC(NAME,AREA_PARAMS_STATIC_CONF));
 #else
-    if(PyObject_IsTrue(pcObj)) 
+    if(PyObject_IsTrue(pcObj))
         return PyUnicode_FromString(PARAM_PY_DOC(NAME,AREA_PARAMS_STATIC_CONF));
 #endif
     PyObject *dict = PyDict_New();
@@ -257,8 +257,8 @@ PyObject* AreaPy::add(PyObject *args, PyObject *keywds)
     //they added '$' to address that issue.
     static char *kwlist[] = {"shape",PARAM_FIELD_STRINGS(ARG,AREA_PARAMS_OPCODE), NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, keywds, 
-                "O|" PARAM_PY_KWDS(AREA_PARAMS_OPCODE), 
+    if (!PyArg_ParseTupleAndKeywords(args, keywds,
+                "O|" PARAM_PY_KWDS(AREA_PARAMS_OPCODE),
                 kwlist,&pcObj,PARAM_REF(PARAM_FARG,AREA_PARAMS_OPCODE)))
         return 0;
 
@@ -302,8 +302,8 @@ PyObject* AreaPy::makeOffset(PyObject *args, PyObject *keywds)
     PARAM_PY_DECLARE_INIT(PARAM_FARG,AREA_PARAMS_OFFSET)
 
     //Parse arguments to overwrite the defaults
-    if (!PyArg_ParseTupleAndKeywords(args, keywds, 
-                "|h" PARAM_PY_KWDS(AREA_PARAMS_OFFSET), kwlist, 
+    if (!PyArg_ParseTupleAndKeywords(args, keywds,
+                "|h" PARAM_PY_KWDS(AREA_PARAMS_OFFSET), kwlist,
                 &index,PARAM_REF(PARAM_FARG,AREA_PARAMS_OFFSET)))
         return 0;
 
@@ -324,8 +324,8 @@ PyObject* AreaPy::makePocket(PyObject *args, PyObject *keywds)
     //Override pocket mode default
     mode = Area::PocketModeZigZagOffset;
 
-    if (!PyArg_ParseTupleAndKeywords(args, keywds, 
-                "|h" PARAM_PY_KWDS(AREA_PARAMS_POCKET), kwlist, 
+    if (!PyArg_ParseTupleAndKeywords(args, keywds,
+                "|h" PARAM_PY_KWDS(AREA_PARAMS_POCKET), kwlist,
                 &index,PARAM_REF(PARAM_FARG,AREA_PARAMS_POCKET)))
         return 0;
 
@@ -338,15 +338,15 @@ PyObject* AreaPy::makePocket(PyObject *args, PyObject *keywds)
 
 PyObject* AreaPy::makeSections(PyObject *args, PyObject *keywds)
 {
-    static char *kwlist[] = {PARAM_FIELD_STRINGS(ARG,AREA_PARAMS_SECTION_EXTRA), 
+    static char *kwlist[] = {PARAM_FIELD_STRINGS(ARG,AREA_PARAMS_SECTION_EXTRA),
                             "heights", "plane", NULL};
     PyObject *heights = NULL;
     PyObject *plane = NULL;
 
     PARAM_PY_DECLARE_INIT(PARAM_FARG,AREA_PARAMS_SECTION_EXTRA)
 
-    if (!PyArg_ParseTupleAndKeywords(args, keywds, 
-                "|" PARAM_PY_KWDS(AREA_PARAMS_SECTION_EXTRA) "OO!", kwlist, 
+    if (!PyArg_ParseTupleAndKeywords(args, keywds,
+                "|" PARAM_PY_KWDS(AREA_PARAMS_SECTION_EXTRA) "OO!", kwlist,
                 PARAM_REF(PARAM_FARG,AREA_PARAMS_SECTION_EXTRA),
                 &heights, &(Part::TopoShapePy::Type), &plane))
         return 0;
@@ -379,7 +379,7 @@ PyObject* AreaPy::makeSections(PyObject *args, PyObject *keywds)
                             h,plane?GET_TOPOSHAPE(plane):TopoDS_Shape());
 
         Py::List ret;
-        for(auto &area : sections) 
+        for(auto &area : sections)
             ret.append(Py::asObject(new AreaPy(new Area(*area,true))));
         return Py::new_reference_to(ret);
     } PY_CATCH_OCC
@@ -402,9 +402,9 @@ PyObject* AreaPy::setParams(PyObject *args, PyObject *keywds)
     //populate the CONF variables with params
     PARAM_FOREACH(AREA_SET,AREA_PARAMS_CONF)
 
-    //Parse arguments to overwrite CONF variables 
-    if (!PyArg_ParseTupleAndKeywords(args, keywds, 
-                "|" PARAM_PY_KWDS(AREA_PARAMS_CONF), kwlist, 
+    //Parse arguments to overwrite CONF variables
+    if (!PyArg_ParseTupleAndKeywords(args, keywds,
+                "|" PARAM_PY_KWDS(AREA_PARAMS_CONF), kwlist,
                 PARAM_REF(PARAM_FNAME,AREA_PARAMS_CONF)))
         return 0;
 
@@ -484,5 +484,5 @@ PyObject *AreaPy::getCustomAttributes(const char* /*attr*/) const
 
 int AreaPy::setCustomAttributes(const char* /*attr*/, PyObject* /*obj*/)
 {
-    return 0; 
+    return 0;
 }

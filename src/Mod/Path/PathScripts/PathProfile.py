@@ -404,7 +404,7 @@ class ObjectProfile(PathAreaOp.ObjectOp):
 
                 if obj.processPerimeter:
                     if obj.HandleMultipleFeatures == 'Collectively':
-                        custDepthparams = self.depthparams
+                        envDepthparams = self.depthparams
 
                         if obj.LimitDepthToFace is True and obj.EnableRotation != 'Off':
                             if profileshape.BoundBox.ZMin > obj.FinalDepth.Value:
@@ -423,14 +423,14 @@ class ObjectProfile(PathAreaOp.ObjectOp):
                     elif obj.HandleMultipleFeatures == 'Individually':
                         for shape in faces:
                             finalDep = obj.FinalDepth.Value
-                            custDepthparams = self.depthparams
+                            envDepthparams = self.depthparams
                             if obj.Side == 'Inside':
                                 if finalDep < shape.BoundBox.ZMin:
                                     # Recalculate depthparams
                                     finalDep = shape.BoundBox.ZMin
-                                    custDepthparams = self._customDepthParams(obj, strDep + 0.5, finalDep)
+                                    envDepthparams = self._customDepthParams(obj, strDep + 0.5, finalDep)
 
-                            env = PathUtils.getEnvelope(shape, depthparams=custDepthparams)
+                            env = PathUtils.getEnvelope(shape, depthparams=envDepthparams)
                             tup = env, False, 'pathProfileFaces', angle, axis, strDep, finalDep
                             shapes.append(tup)
 
